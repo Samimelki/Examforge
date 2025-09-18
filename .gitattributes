@@ -1,0 +1,4 @@
+* text=auto eol=lf
+
+# Treat OpenAPI yaml as text
+a*.yaml text linguist-language=YAML

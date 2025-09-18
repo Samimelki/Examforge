@@ -1,0 +1,31 @@
+# Models registry
+# Each entry documents the exact model, source, license, and hardware notes.
+
+llm:
+  - name: mistral:7b-instruct
+    runtime: ollama
+    source: https://ollama.com/library/mistral
+    license: Apache-2.0 (check upstream)
+    quant: Q4_K_M
+    notes: Good default on Apple Silicon (MPS). GPU profile optional.
+
+embeddings:
+  - name: sentence-transformers/all-mpnet-base-v2
+    runtime: huggingface
+    source: https://huggingface.co/sentence-transformers/all-mpnet-base-v2
+    license: Apache-2.0
+    dim: 768
+    notes: General-purpose encoder.
+  - name: cambridgeltl/SapBERT-from-PubMedBERT-fulltext
+    runtime: huggingface
+    source: https://huggingface.co/cambridgeltl/SapBERT-from-PubMedBERT-fulltext
+    license: MIT
+    dim: 768
+    notes: Biomedical/domain encoder option.
+
+reranker:
+  - name: cross-encoder/ms-marco-MiniLM-L-6-v2
+    runtime: huggingface
+    source: https://huggingface.co/cross-encoder/ms-marco-MiniLM-L-6-v2
+    license: Apache-2.0
+    notes: Cross-encoder reranker enabled from Sprint 2 (toggle).

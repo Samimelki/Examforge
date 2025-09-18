@@ -1,0 +1,181 @@
+version: "3.8"
+
+services:
+  traefik:
+    image: traefik:v2.10
+    command:
+      - "--api.dashboard=true"
+      - "--providers.docker=true"
+      - "--providers.docker.exposedbydefault=false"
+      - "--entrypoints.web.address=:80"
+    ports:
+      - "10080:80"
+      - "18080:8080" # Traefik dashboard
+    volumes:
+      - "/var/run/docker.sock:/var/run/docker.sock:ro"
+    networks:
+      - backend
+
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    networks:
+      - backend
+
+  redis:
+    image: redis:7
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - backend
+
+  minio:
+    image: minio/minio:RELEASE.2024-08-17T01-24-54Z
+    command: ["server", "/data", "--console-address", ":9001"]
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+    volumes:
+      - minio-data:/data
+    ports:
+      - "9002:9000"
+      - "9003:9001"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/ready"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.minio.rule=Host(`${MINIO_HOST}`)"
+      - "traefik.http.services.minio.loadbalancer.server.port=9000"
+    networks:
+      - backend
+
+  qdrant:
+    image: qdrant/qdrant:v1.9.0
+    ports:
+      - "6334:6333"
+    volumes:
+      - qdrant-data:/qdrant/storage
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:6333/readyz"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - backend
+
+  opensearch:
+    image: opensearchproject/opensearch:2.12.0
+    environment:
+      - discovery.type=single-node
+      - bootstrap.memory_lock=true
+      - OPENSEARCH_JAVA_OPTS=${OPENSEARCH_JAVA_OPTS:-"-Xms512m -Xmx512m"}
+      - DISABLE_SECURITY_PLUGIN=true
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+    ports:
+      - "9201:9200"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9200/_cluster/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+    volumes:
+      - opensearch-data:/usr/share/opensearch/data
+    networks:
+      - backend
+
+  dashboards:
+    image: opensearchproject/opensearch-dashboards:2.12.0
+    depends_on:
+      - opensearch
+    environment:
+      - OPENSEARCH_HOSTS=["http://opensearch:9200"]
+      - DISABLE_SECURITY_DASHBOARDS_PLUGIN=true
+    ports:
+      - "5602:5601"
+    networks:
+      - backend
+
+  ingest:
+    build: ../../services/ingest
+    image: examforge/ingest:dev
+    depends_on:
+      - minio
+      - postgres
+    ports:
+      - "7001:7001"
+    networks:
+      - backend
+
+  embed:
+    build: ../../services/embed
+    image: examforge/embed:dev
+    ports:
+      - "7002:7002"
+    networks:
+      - backend
+
+  retriever:
+    build: ../../services/retriever
+    image: examforge/retriever:dev
+    depends_on:
+      - opensearch
+      - qdrant
+    ports:
+      - "7003:7003"
+    networks:
+      - backend
+
+  exam-engine:
+    build: ../../services/exam-engine
+    image: examforge/exam-engine:dev
+    ports:
+      - "7004:7004"
+    networks:
+      - backend
+
+  teacher-ui:
+    build: ../../apps/teacher-ui
+    image: examforge/teacher-ui:dev
+    ports:
+      - "3101:3001"
+    networks:
+      - backend
+
+  student-ui:
+    build: ../../apps/student-ui
+    image: examforge/student-ui:dev
+    ports:
+      - "3002:3002"
+    networks:
+      - backend
+
+networks:
+  backend:
+    driver: bridge
+
+volumes:
+  pgdata:
+  minio-data:
+  qdrant-data:
+  opensearch-data:
+  ollama:

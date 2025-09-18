@@ -1,0 +1,106 @@
+## General guidelines (ALWAYS)
+- **Local-first, on-prem**: No external paid LLM APIs. Prefer local models via Ollama; keep deployments self-hostable.
+- **Maintainability ceiling**: No source file may exceed 350 lines. Split into modules early.
+- **Separation of concerns**: Keep domain logic, application/services, and infrastructure isolated. No cross-layer imports except through defined interfaces.
+- **Single responsibility**: Modules and functions should do one thing well. Avoid deep nesting; prefer early returns.
+- **Explicit contracts**: All services expose OpenAPI specs; shared types generated from contracts. Backwards-compatible changes unless versioned.
+- **Versioning & changelogs**: Semantic versioning (MAJOR.MINOR.PATCH) for services and APIs; bump on contract changes; auto-generate CHANGELOG on release.
+- **Determinism & reproducibility**: Use fixed seeds for tests and golden datasets. Document versions of models and data.
+- **Security by default**: Minimize PII, encrypt at rest, audit writes, principle of least privilege for services.
+- **Multilingual readiness**: UTF-8 everywhere, support RTL/LTR; detect and store `lang` and `direction` in metadata.
+
+### Process requirements for assistants
+- **FETCH RULES BEFORE ACTING**: Always fetch and apply these rules at conversation start, before each user request, before any code changes, and whenever the topic/file type/task changes.
+- **Respect file-type rules**: Apply `.py`, `.ts/.tsx`, `.md/.mdc`, `docker`, and `env` rules below.
+- **Adhere to sprint plan**: Align implementations to the current `Sprints.md`; propose edits when misaligned.
+- **Changelog discipline**: Any PR changing a contract/service must increment version and update CHANGELOG.
+
+## Architecture and project structure
+- **Monorepo layout**:
+  - `apps/teacher-ui/` — React/Vite app for teachers.
+  - `apps/student-ui/` — React/Vite app for students.
+  - `services/ingest/` — FastAPI service (upload, parsing, OCR pipeline).
+  - `services/embed/` — FastAPI service (embedding registry + batch workers).
+  - `services/retriever/` — FastAPI service (hybrid retrieval + reranker).
+  - `services/exam-engine/` — FastAPI service (question generation, validation).
+  - `packages/shared-types/` — schemas, OpenAPI-generated clients, Zod/Pydantic models.
+  - `packages/ui-kit/` — shared UI components and design tokens.
+  - `infra/compose/` — Docker Compose, Traefik, Postgres, MinIO, Redis, Qdrant, ES/OpenSearch.
+  - `infra/migrations/` — database migrations.
+  - `docs/` — architecture docs, ADRs, runbooks.
+  - `CODEOWNERS` — code ownership and review rules.
+
+- **Layering per service**:
+  - `domain/` — pure business logic, entities, value objects.
+  - `application/` — use-cases, service orchestration, ports/interfaces.
+  - `infrastructure/` — adapters (DB, ES/Qdrant, queues), HTTP, clients.
+  - `interfaces/` — FastAPI routers/controllers, request/response models.
+  - `tests/` — unit, integration, contract tests; chaos tests for infra.
+
+- **UI separation**:
+  - Distinct apps for teachers and students. No cross-imports from app code; share only via `packages/ui-kit` and `packages/shared-types`.
+  - Route guards and auth contexts segregated by role.
+
+## Modularity principles
+- **Async-first**: Long-running tasks (OCR, embeddings, chunk indexing, KG) are queued; HTTP endpoints enqueue and return job IDs.
+- **Data provenance logging**: Persist generation/retrieval traces `{retrieved_doc_ids, chunk_ids, embeddings_version, model_version, params}` per response for audits.
+- **Pluggable embeddings**: Registry pattern with per-corpus defaults; support dual embeddings (general + domain) stored separately and weighted at query time.
+- **Retrieval**: Hybrid BM25 + dense; optional cross-encoder reranker. Field boosts configurable.
+- **Evidence validation**: 3-step rule — exact match → accept; similarity ≥0.92 → accept as paraphrase; else regenerate.
+- **Feature flags**: Guard optional OCR, captioning, reranker with env flags.
+- **Observability**: Prometheus metrics and OpenTelemetry tracing enabled across services.
+
+## Coding standards
+- **File size limit**: Max 350 lines per file for `.py`, `.ts`, `.tsx`, `.go`, `.rs`. Split into smaller modules; prefer composition.
+- **Naming**: Verb phrases for functions; descriptive variable names (no 1–2 char names). Avoid abbreviations.
+- **Types**: Python uses type hints (PEP 484) and `pydantic` for IO. TypeScript uses `strict` mode, no `any` in exported APIs.
+- **Control flow**: Guard clauses, minimal nesting, avoid broad try/except. Never swallow exceptions.
+- **Comments**: Explain "why" not "how". No TODOs—implement or file an issue.
+- **Formatting**: Match formatter defaults (Black/ruff for Python; Prettier/ESLint for TypeScript). Wrap long lines.
+
+## Testing & quality gates
+- **Unit tests** for domain/application; **integration tests** for adapters; **contract tests** for OpenAPI.
+- **E2E**: Playwright for teacher/student flows with seeded data.
+- **Golden sets**: Maintain retrieval and generation gold datasets; track Recall@k, MRR, hallucination rate, and teacher-acceptance.
+- **Chaos testing**: Simulate failures of Qdrant/Redis/MinIO/ES to validate resilience.
+- **Coverage**: Target ≥80% for domain/application layers; do not block infra adapters below that initially.
+
+## File type rules
+### .py (Python)
+- Use `ruff` + `black` + `mypy`. Disallow wildcard imports. Enable `ruff` `max-complexity=10`.
+- Structure: `__init__.py` only for exports; no side effects.
+- IO models in `interfaces/` with `pydantic`. Pure logic in `domain/`.
+
+### .ts/.tsx (TypeScript/React)
+- Use `eslint` (typescript-eslint) + `prettier`. Enable `max-lines: ["error", 350]` and `complexity: ["warn", 10]`.
+- Components <= 250 lines; extract hooks and subcomponents eagerly.
+- Strict mode on; no implicit any; prefer discriminated unions for API results.
+
+### .md/.mdc (Docs and Cursor rules)
+- Keep sections short and scannable. Use `##`/`###` headings, bullet lists, and code fences only when necessary.
+- Architecture Decision Records (ADRs) live in `docs/adrs/` and are named `YYYY-MM-DD-title.md` (ISO date prefix).
+
+### Docker/Compose
+- Pin base images. Use non-root containers. Healthchecks required. Resources limited via Compose profiles.
+
+### Env/config
+- Provide `.env.example` for every service. No secrets in git. Validate env on startup with clear errors.
+
+## CI/CD enforcement (recommended)
+- **Pre-commit**: hooks for ruff/black/mypy; eslint/prettier; a custom file-length checker (fail if >350 lines for code files).
+- **ESLint**: enable `max-lines` rule (350) and `import/no-cycle`.
+- **Ruff**: enforce select rules, including complexity and clarity; no unused imports.
+- **Type checks**: `mypy` for Python; `tsc --noEmit` for TS.
+- **Contracts**: build and diff OpenAPI specs; run contract tests.
+- **Metrics**: CI job runs retrieval and generation evaluations on gold sets and publishes Recall@k/MRR and acceptance trends.
+- **Release gates**: Contract changes require version bump and CHANGELOG update; CI fails otherwise.
+
+## Data & security
+- **Licensing**: Verify and document model licenses (Mistral/Mixtral, Llama); store notices in `docs/licenses/`.
+- **Multi-tenancy & SSO**: Plan schema-per-tenant or RLS; separate indexes/collections per tenant where feasible; plan SSO/OAuth for campus integration.
+- **RBAC**: Define roles (student, teacher, admin) with route guards in UI and claims-based authorization in services.
+- **PII & retention**: Minimize and encrypt at rest; audit all writes to student data; document retention and deletion policies.
+
+## Decision workflow
+- When deviating from these rules, create an ADR (`docs/adrs/YYYY-MM-DD-title.md`) and link it in PR description.
+- Assistants must propose rule edits in PR if repeated exceptions are necessary.

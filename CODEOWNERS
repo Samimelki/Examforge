@@ -1,0 +1,19 @@
+# Default owners
+*       @samimelki
+
+# Frontend apps
+/apps/teacher-ui/   @samimelki
+/apps/student-ui/   @samimelki
+
+# Services
+/services/ingest/      @samimelki
+/services/embed/       @samimelki
+/services/retriever/   @samimelki
+/services/exam-engine/ @samimelki
+
+# Shared packages
+/packages/ui-kit/      @samimelki
+/packages/shared-types/ @samimelki
+
+# Infra
+/infra/**              @samimelki
