@@ -121,6 +121,20 @@ services:
     depends_on:
       - minio
       - postgres
+      - qdrant
+    environment:
+      S3_ENDPOINT: http://minio:9000
+      S3_ACCESS_KEY: ${MINIO_ROOT_USER}
+      S3_SECRET_KEY: ${MINIO_ROOT_PASSWORD}
+      S3_BUCKET: examforge
+      PG_DSN: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      OS_HOST: http://opensearch:9200
+      OS_INDEX: chunks
+      EMBED_URL: http://embed:7002/v1/embed
+      QDRANT_HOST: qdrant
+      QDRANT_PORT: 6333
+      QDRANT_COLLECTION: chunks
+      QDRANT_RECREATE_ON_DIM_CHANGE: "true"
     ports:
       - "7001:7001"
     networks:
@@ -129,6 +143,11 @@ services:
   embed:
     build: ../../services/embed
     image: examforge/embed:dev
+    environment:
+      EMBED_DIM: 768
+      EMBED_SEED: examforge-seed
+      OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
+      EMBED_MODEL: ${EMBED_MODEL:-nomic-embed-text}
     ports:
       - "7002:7002"
     networks:
@@ -140,14 +159,38 @@ services:
     depends_on:
       - opensearch
       - qdrant
+      - embed
+    environment:
+      OS_HOST: http://opensearch:9200
+      OS_INDEX: chunks
+      QDRANT_HOST: qdrant
+      QDRANT_PORT: 6333
+      QDRANT_COLLECTION: chunks
+      EMBED_URL: http://embed:7002/v1/embed
+      RRF_K: 60
     ports:
       - "7003:7003"
+    networks:
+      - backend
+
+  grobid:
+    image: grobid/grobid:0.8.0
+    environment:
+      - GROBID_MAX_CONCURRENCY=2
+    ports:
+      - "8070:8070"
     networks:
       - backend
 
   exam-engine:
     build: ../../services/exam-engine
     image: examforge/exam-engine:dev
+    environment:
+      OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
+      GEN_MODEL: ${GEN_MODEL:-llama3:8b}
+      OLLAMA_TIMEOUT: ${OLLAMA_TIMEOUT:-900}
+      GEN_TEMPERATURE: ${GEN_TEMPERATURE:-0.1}
+      GEN_TOP_P: ${GEN_TOP_P:-0.9}
     ports:
       - "7004:7004"
     networks:

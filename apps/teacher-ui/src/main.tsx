@@ -24,8 +24,11 @@ function App() {
   const [uploadMsg, setUploadMsg] = React.useState<string>('')
   const [question, setQuestion] = React.useState<string>('')
   const [answer, setAnswer] = React.useState<any>(null)
+  const [passages, setPassages] = React.useState<any[]>([])
   const [uploadBusy, setUploadBusy] = React.useState<boolean>(false)
   const [genBusy, setGenBusy] = React.useState<boolean>(false)
+  const fileRef = React.useRef<HTMLInputElement>(null)
+  const [dragOver, setDragOver] = React.useState<boolean>(false)
 
   const allHealthy = ['ingest', 'embed', 'retriever', 'exam'].every((k) => status[k] === 'ok')
 
@@ -42,12 +45,7 @@ function App() {
     run()
   }, [])
 
-  async function onUpload(e: React.FormEvent<HTMLFormElement>) {
-    e.preventDefault()
-    const form = e.currentTarget as HTMLFormElement
-    const fileInput = (form.elements.namedItem('file') as HTMLInputElement)
-    const file = fileInput?.files?.[0]
-    if (!file) return
+  async function handleFile(file: File) {
     setUploadBusy(true)
     setUploadMsg('')
     try {
@@ -57,13 +55,33 @@ function App() {
       fd.append('mime', file.type || 'application/octet-stream')
       const res = await fetch(endpoints.ingest + '/v1/documents/upload', { method: 'POST', body: fd })
       const data = await res.json()
-      setUploadMsg(res.ok ? `Uploaded: ${data.document_id}` : `Upload failed: ${res.status}`)
+      if (res.ok) {
+        setUploadMsg(`Uploaded: ${data.document_id}`)
+        // Auto-parse PDFs
+        const isPdf = (file.type === 'application/pdf') || /\.pdf$/i.test(file.name)
+        if (isPdf && data.storage_uri) {
+          const parseRes = await fetch(`${endpoints.ingest}/v1/documents/parse?document_id=${encodeURIComponent(data.document_id)}&s3_uri=${encodeURIComponent(data.storage_uri)}`, { method: 'POST' })
+          const parseJson = await parseRes.json()
+          setUploadMsg(parseRes.ok ? `Uploaded and parsed: ${parseJson.chunks || parseJson.pages || 0} chunks` : `Uploaded; parse failed: ${parseJson.reason || parseRes.status}`)
+        }
+      } else {
+        setUploadMsg(`Upload failed: ${res.status}`)
+      }
     } catch (err: any) {
       setUploadMsg('Upload error')
     } finally {
       setUploadBusy(false)
-      form.reset()
     }
+  }
+
+  async function onUpload(e: React.FormEvent<HTMLFormElement>) {
+    e.preventDefault()
+    const form = e.currentTarget as HTMLFormElement
+    const fileInput = (form.elements.namedItem('file') as HTMLInputElement)
+    const file = fileInput?.files?.[0]
+    if (!file) return
+    await handleFile(file)
+    form.reset()
   }
 
   async function onAsk(e: React.FormEvent<HTMLFormElement>) {
@@ -71,6 +89,7 @@ function App() {
     if (!question.trim()) return
     setGenBusy(true)
     setAnswer(null)
+    setPassages([])
     try {
       const ret = await fetch(endpoints.retriever + '/v1/retrieve', {
         method: 'POST',
@@ -78,11 +97,19 @@ function App() {
         body: JSON.stringify({ query: question, top_k: 5, rerank: false }),
       })
       const retData = await ret.json()
-      const passages = retData.passages || []
+      // Deduplicate by doc_id + page + text signature (first 64 chars)
+      const seen = new Set<string>()
+      const deduped = (retData.passages || []).filter((p: any) => {
+        const sig = `${p.doc_id}:${p?.metadata?.page}:${(p.text || '').slice(0,64)}`
+        if (seen.has(sig)) return false
+        seen.add(sig)
+        return true
+      })
+      setPassages(deduped)
       const gen = await fetch(endpoints.exam + '/v1/generate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ question_type: 'mcq', passages }),
+        body: JSON.stringify({ question_type: 'mcq', passages: deduped, no_cache: true }),
       })
       const genData = await gen.json()
       setAnswer(genData)
@@ -117,11 +144,42 @@ function App() {
       <section style={{ marginTop: 24 }}>
         <h3>Upload PDF / PPTX</h3>
         <form onSubmit={onUpload}>
-          <input type="file" name="file" accept="application/pdf,application/vnd.openxmlformats-officedocument.presentationml.presentation" />
+          <input
+            ref={fileRef}
+            id="file-input"
+            aria-label="Upload PDF or PPTX"
+            type="file"
+            name="file"
+            accept="application/pdf,application/vnd.openxmlformats-officedocument.presentationml.presentation"
+            onChange={(e) => {
+              const f = e.currentTarget.files?.[0]
+              if (f) {
+                void handleFile(f)
+                e.currentTarget.value = ''
+              }
+            }}
+            style={{ display: 'none' }}
+          />
+          <button type="button" onClick={() => fileRef.current?.click()} disabled={uploadBusy}>
+            {uploadBusy ? 'Uploading...' : 'Choose file'}
+          </button>
           <button type="submit" disabled={uploadBusy} style={{ marginLeft: 8 }}>
             {uploadBusy ? 'Uploading...' : 'Upload'}
           </button>
         </form>
+        <div
+          onDragOver={(e) => { e.preventDefault(); setDragOver(true) }}
+          onDragLeave={() => setDragOver(false)}
+          onDrop={(e) => {
+            e.preventDefault();
+            setDragOver(false);
+            const f = e.dataTransfer.files?.[0]
+            if (f) void handleFile(f)
+          }}
+          style={{ marginTop: 12, padding: 16, border: '2px dashed #bbb', borderColor: dragOver ? '#4caf50' : '#bbb', borderRadius: 8, textAlign: 'center' }}
+        >
+          Drag & drop a PDF here
+        </div>
         {uploadMsg && <p>{uploadMsg}</p>}
       </section>
 
@@ -147,13 +205,22 @@ function App() {
                 <p><strong>MCQ:</strong> {answer.payload?.stem}</p>
                 <ol type="A">
                   {answer.payload?.options?.map((opt: any, idx: number) => (
-                    <li key={idx}>{opt.text}</li>
+                    <li key={idx} style={{ color: opt.correct ? 'green' : undefined, fontWeight: opt.correct ? 600 : 400 }}>
+                      {opt.text} {opt.correct ? '(Correct)' : ''}
+                    </li>
                   ))}
                 </ol>
-                {answer.payload?.evidence && (
-                  <p>
-                    <em>Evidence:</em> {answer.payload.evidence.map((e: any) => e.ref).join(', ')}
-                  </p>
+                {Array.isArray(answer.payload?.evidence_validation) && answer.payload.evidence_validation.length > 0 && (
+                  <div>
+                    <strong>Evidence:</strong>
+                    <ul>
+                      {answer.payload.evidence_validation.map((e: any, i: number) => (
+                        <li key={i} style={{ color: e.status === 'verbatim' ? 'green' : e.status === 'paraphrased' ? 'orange' : 'red' }}>
+                          {e.ref} ({e.status})
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
                 )}
               </div>
             )}
@@ -171,6 +238,18 @@ function App() {
           </div>
         )}
       </section>
+
+      {passages.length > 0 && (
+        <section style={{ marginTop: 24 }}>
+          <h3>Retrieved passages</h3>
+          {passages.map((p, i) => (
+            <div key={i} style={{ padding: 8, border: '1px dashed #ccc', borderRadius: 6, marginBottom: 8 }}>
+              <div style={{ fontSize: 12, color: '#555' }}>doc: {p.doc_id} • page: {p?.metadata?.page ?? '-'} • score: {typeof p.score === 'number' ? p.score.toFixed(2) : String(p.score)}</div>
+              <div>{p.text}</div>
+            </div>
+          ))}
+        </section>
+      )}
     </div>
   )
 }

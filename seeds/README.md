@@ -18,6 +18,7 @@ You can keep placeholders committed with `.gitkeep` files; actual documents are 
 1) Bring up the stack:
    - `make dev-up`
 2) Open Teacher UI at http://localhost:3101
+
 3) Upload a small PDF or PPTX (from `seeds/docs/` or `seeds/slides/`).
    - You should see: `Uploaded: doc_<filename>`
 4) Ask a question in the input box.
