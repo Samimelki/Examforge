@@ -1,0 +1,37 @@
+#!/bin/bash
+# Pre-commit hook to ensure OpenAPI specs are up to date
+# To enable: cp .githooks/pre-commit.example .git/hooks/pre-commit && chmod +x .git/hooks/pre-commit
+
+set -e
+
+# Check if any service code has changed
+if git diff --cached --name-only | grep -q "services/.*/src/"; then
+    echo "🔍 Service code changes detected, checking OpenAPI specs..."
+
+    # Check if services are running
+    if ! curl -s -f http://localhost:7001/health > /dev/null 2>&1; then
+        echo "⚠️  Warning: Services not running. Cannot validate OpenAPI specs."
+        echo "   Run 'make dev-up' to start services, then run 'make update-openapi'"
+        echo ""
+        read -p "Continue anyway? (y/n) " -n 1 -r
+        echo
+        if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+            exit 1
+        fi
+    else
+        echo "📝 Updating OpenAPI specs..."
+        python3 scripts/update-openapi-specs.py
+
+        # Check if any OpenAPI files changed
+        if git diff --name-only | grep -q "openapi.yaml"; then
+            echo "⚠️  OpenAPI specs were updated. Please review and stage them:"
+            echo ""
+            git diff --stat services/*/openapi.yaml 2>/dev/null || true
+            echo ""
+            echo "Run: git add services/*/openapi.yaml"
+            exit 1
+        else
+            echo "✅ OpenAPI specs are up to date"
+        fi
+    fi
+fi
