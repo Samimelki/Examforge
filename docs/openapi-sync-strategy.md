@@ -39,22 +39,29 @@ services/exam-engine/openapi.yaml
 
 ## Sync Strategies
 
-### ⭐ Option 1: Auto-Generate from Running Services (Recommended)
+### ⭐ Option 1: Auto-Export from FastAPI Apps (Recommended)
 
 **How it works:**
-1. Start services: `make dev-up`
-2. Run sync script: `make update-openapi`
-3. Review changes: `git diff services/*/openapi.yaml`
-4. Commit if valid: `git add services/*/openapi.yaml && git commit`
+1. Run export script: `make update-openapi` (no services needed!)
+2. Review changes: `git diff services/*/openapi.yaml`
+3. Commit if valid: `git add services/*/openapi.yaml && git commit`
+
+**Technical details:**
+- Each service has an `export_openapi.py` script
+- Imports the FastAPI `app` object directly from code
+- Calls `app.openapi()` to get the spec
+- No need for services to be running!
 
 **Pros:**
-- Always accurate
+- Always accurate (extracts directly from code)
 - No manual maintenance
 - Catches all changes automatically
+- Fast (no need to start Docker containers)
+- Works offline
+- Simple and reliable
 
 **Cons:**
-- Requires services to be running
-- Extra step in workflow
+- Extra step in workflow (can be automated with pre-commit hook)
 
 **When to use:**
 - After adding/modifying endpoints
@@ -64,8 +71,8 @@ services/exam-engine/openapi.yaml
 
 **Setup:**
 ```bash
-# Install dependencies
-pip install pyyaml requests
+# Install PyYAML (optional, will use JSON otherwise)
+pip install pyyaml
 
 # Update specs
 make update-openapi
@@ -86,19 +93,19 @@ chmod +x .git/hooks/pre-commit
 
 **How it works:**
 - Detects when service code changes
-- Automatically runs OpenAPI sync
+- Automatically runs `make update-openapi`
 - Warns if specs are out of sync
 - Prevents commit if validation fails
 
 **Pros:**
-- Automated
+- Fully automated
 - Catches drift early
 - No manual steps
+- No need for running services
 
 **Cons:**
-- Requires services running locally
 - Slightly slower commits
-- May need to bypass for WIP commits
+- May need to bypass for WIP commits (`git commit --no-verify`)
 
 ---
 

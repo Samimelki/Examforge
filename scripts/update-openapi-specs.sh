@@ -1,32 +1,37 @@
 #!/bin/bash
-# Script to update OpenAPI specs from running services
-# Usage: ./scripts/update-openapi-specs.sh
+# Update OpenAPI specs from FastAPI app definitions
+# No need to run services - extracts directly from code
 
 set -e
 
-SERVICES=("ingest:7001" "embed:7002" "retriever:7003" "exam-engine:7004")
+SERVICES=("ingest" "embed" "retriever" "exam-engine")
 
-echo "Updating OpenAPI specifications from running services..."
+echo "📝 Updating OpenAPI specifications from FastAPI apps..."
 echo ""
 
-for service_port in "${SERVICES[@]}"; do
-    IFS=':' read -r service port <<< "$service_port"
+success=0
+total=${#SERVICES[@]}
 
-    echo "📝 Updating $service service..."
+for service in "${SERVICES[@]}"; do
+    echo "📦 Exporting $service spec..."
 
-    # Check if service is running
-    if curl -s -f "http://localhost:$port/health" > /dev/null 2>&1; then
-        # Fetch OpenAPI JSON and convert to YAML
-        curl -s "http://localhost:$port/openapi.json" | \
-            python3 -c "import sys, yaml, json; yaml.dump(json.load(sys.stdin), sys.stdout, default_flow_style=False, sort_keys=False)" \
-            > "services/$service/openapi.yaml"
-
-        echo "✅ Updated services/$service/openapi.yaml"
+    if [ -f "services/$service/export_openapi.py" ]; then
+        if (cd "services/$service" && python3 export_openapi.py); then
+            ((success++))
+        else
+            echo "❌ Failed to export $service"
+        fi
     else
-        echo "⚠️  Service $service not running on port $port, skipping..."
+        echo "❌ Export script not found: services/$service/export_openapi.py"
     fi
 
     echo ""
 done
 
-echo "✨ Done! OpenAPI specs updated."
+echo "✨ Done! $success/$total OpenAPI specs updated."
+
+if [ $success -eq $total ]; then
+    exit 0
+else
+    exit 1
+fi

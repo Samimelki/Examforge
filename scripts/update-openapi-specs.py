@@ -1,69 +1,66 @@
 #!/usr/bin/env python3
 """
-Script to update OpenAPI specs from running services.
-Usage: python scripts/update-openapi-specs.py
+Update OpenAPI specs by directly exporting from FastAPI apps.
+No need to run services - extracts specs from app definitions.
 """
 
-import json
+import subprocess
 import sys
-import requests
 from pathlib import Path
 
-SERVICES = {
-    "ingest": 7001,
-    "embed": 7002,
-    "retriever": 7003,
-    "exam-engine": 7004,
-}
+SERVICES = ["ingest", "embed", "retriever", "exam-engine"]
 
 def update_openapi_specs():
-    """Fetch OpenAPI specs from running services and save to YAML files."""
-    print("Updating OpenAPI specifications from running services...\n")
+    """Export OpenAPI specs from FastAPI app definitions."""
+    print("📝 Updating OpenAPI specifications from FastAPI apps...\n")
 
     success_count = 0
-    for service, port in SERVICES.items():
-        print(f"📝 Updating {service} service...")
+    failed = []
 
-        # Check if service is running
-        try:
-            health_resp = requests.get(f"http://localhost:{port}/health", timeout=2)
-            if not health_resp.ok:
-                print(f"⚠️  Service {service} not healthy on port {port}, skipping...\n")
-                continue
-        except requests.RequestException:
-            print(f"⚠️  Service {service} not running on port {port}, skipping...\n")
+    for service in SERVICES:
+        print(f"📦 Exporting {service} spec...")
+
+        script_path = Path(f"services/{service}/export_openapi.py")
+
+        if not script_path.exists():
+            print(f"❌ Export script not found: {script_path}\n")
+            failed.append(service)
             continue
 
-        # Fetch OpenAPI spec
         try:
-            spec_resp = requests.get(f"http://localhost:{port}/openapi.json", timeout=5)
-            spec_resp.raise_for_status()
-            spec = spec_resp.json()
+            # Run the export script in the service directory
+            result = subprocess.run(
+                [sys.executable, "export_openapi.py"],
+                cwd=f"services/{service}",
+                capture_output=True,
+                text=True,
+                timeout=10
+            )
 
-            # Save to YAML (using JSON as intermediate format, can be converted to YAML)
-            output_path = Path(f"services/{service}/openapi.yaml")
+            if result.returncode == 0:
+                print(result.stdout, end="")
+                success_count += 1
+            else:
+                print(f"❌ Failed to export {service}:")
+                print(result.stderr)
+                failed.append(service)
 
-            # Try to use PyYAML if available
-            try:
-                import yaml
-                with open(output_path, "w") as f:
-                    yaml.dump(spec, f, default_flow_style=False, sort_keys=False)
-                print(f"✅ Updated {output_path} (YAML)\n")
-            except ImportError:
-                # Fallback to JSON if PyYAML not available
-                output_path = Path(f"services/{service}/openapi.json")
-                with open(output_path, "w") as f:
-                    json.dump(spec, f, indent=2)
-                print(f"✅ Updated {output_path} (JSON - install PyYAML for YAML output)\n")
+        except subprocess.TimeoutExpired:
+            print(f"❌ Timeout exporting {service}\n")
+            failed.append(service)
+        except Exception as e:
+            print(f"❌ Error exporting {service}: {e}\n")
+            failed.append(service)
 
-            success_count += 1
-
-        except requests.RequestException as e:
-            print(f"❌ Failed to fetch OpenAPI spec from {service}: {e}\n")
-            continue
+        print()
 
     print(f"✨ Done! {success_count}/{len(SERVICES)} OpenAPI specs updated.")
-    return success_count == len(SERVICES)
+
+    if failed:
+        print(f"\n⚠️  Failed services: {', '.join(failed)}")
+        return False
+
+    return True
 
 if __name__ == "__main__":
     success = update_openapi_specs()
