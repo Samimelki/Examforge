@@ -109,7 +109,7 @@ function App() {
       const gen = await fetch(endpoints.exam + '/v1/generate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ question_type: 'mcq', passages: deduped, no_cache: true }),
+        body: JSON.stringify({ question_type: 'mcq', question: question, passages: deduped, no_cache: true }),
       })
       const genData = await gen.json()
       setAnswer(genData)

@@ -1,6 +1,7 @@
 from fastapi import FastAPI, UploadFile, File, Form
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
+from contextlib import asynccontextmanager
 import boto3
 import os
 import uuid
@@ -13,15 +14,6 @@ from qdrant_client import QdrantClient
 from qdrant_client.http.models import Distance, VectorParams, PointStruct
 import re
 import requests
-
-app = FastAPI(title="Examforge Ingest API", version="0.5.1")
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=False,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
 
 S3_ENDPOINT = os.getenv("S3_ENDPOINT", "http://localhost:9002")
 S3_ACCESS_KEY = os.getenv("S3_ACCESS_KEY", "admin")
@@ -83,8 +75,9 @@ def init_schema():
             conn.commit()
 
 
-@app.on_event("startup")
-async def on_startup():
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Startup
     init_schema()
     # Ensure OS index
     if not os_client.indices.exists(index=OS_INDEX):
@@ -111,6 +104,18 @@ async def on_startup():
             collection_name=QDRANT_COLLECTION,
             vectors_config=VectorParams(size=dim, distance=Distance.COSINE),
         )
+    yield
+    # Shutdown code can go here if needed
+
+
+app = FastAPI(title="Examforge Ingest API", version="0.5.1", lifespan=lifespan)
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=False,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 
 @app.get("/health")
